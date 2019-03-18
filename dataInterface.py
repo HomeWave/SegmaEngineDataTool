@@ -4,7 +4,8 @@ Created on Wed Mar  6 20:42:26 2019
 
 @author: bob
 """
-
+import warnings
+warnings.filterwarnings('ignore')
 # 初始化sparkSession和HiveSession
 from pyspark.sql import SparkSession
 from pyspark_llap.sql.session import HiveWarehouseSession
@@ -57,6 +58,9 @@ class HiveInterface():
         mode(saveMode=saveMode).option("table", databaseName+'.'+tableName).save()
         return True
 
+
+#==============================================================================
+#==============================================================================
 '''
 单元测试
 '''

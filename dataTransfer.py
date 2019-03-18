@@ -4,20 +4,19 @@ Created on Wed Mar  6 22:39:00 2019
 
 @author: bob
 """
-
+import warnings
+warnings.filterwarnings('ignore')
 import unittest
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import monotonically_increasing_id, floor, row_number
 from pyspark.sql.types import StructType, StructField, LongType, FloatType, StringType  # 导入类型
 from pyspark.sql import Window
-from dataInterface import HiveInterface
+import numpy as np
 
 spark=SparkSession \
 .builder \
 .appName('bob_app') \
 .getOrCreate()
-
-
 
 #class CustomError(Exception): 
 #    def __init__(self,ErrorInfo): 
@@ -26,91 +25,102 @@ spark=SparkSession \
 #    def __str__(self): 
 #        return self.errorinfo
 
-def addIdCol(dataDF, idColName="continuousID"):
+def addIdCol(dataDF, idFieldName="continuousID"):
     '''
     添加连续递增id列
-    Input
-        dataDF:待处理数据表，spark dataframe
-        idColName:id列名
+    :param dataDF: 待处理数据表，spark dataframe
+    :param idFieldName: id列名
+    :return:
     '''
     numParitions = dataDF.rdd.getNumPartitions() # 获取分区数
     data_withindex = dataDF.withColumn("increasing_id_temp", monotonically_increasing_id()) # 添加递增列
-    data_withindex = data_withindex.withColumn(idColName, row_number().over(Window.orderBy("increasing_id_temp"))-1) # 生成连续递增id列，此时分区数为1
+    data_withindex = data_withindex.withColumn(idFieldName, row_number().over(Window.orderBy("increasing_id_temp"))-1) # 生成连续递增id列，此时分区数为1
     data_withindex = data_withindex.repartition(numParitions) # 按原分区数重新分区，所以不用紧张前面分区数变为1时报出的性能降低警告
     data_withindex = data_withindex.sort("increasing_id_temp") # 由于重分区后会打乱顺序，需重新排序
     data_withindex = data_withindex.drop("increasing_id_temp") # 删除临时生成的递增列
     return data_withindex
 
-def zScoreNormal(dataDF, colName, suffix=r"zScoreNormal"):
+def zScoreNormal(dataDF, fieldNameList, suffix=r"zScoreNormal"):
     '''
     Z-Score 标准化
-    对指定的colName，逐一进行标准化
+    对指定的fieldNameList，逐一进行标准化
     只能处理数值型字段
-    Input
-        dataDF:待处理数据表，spark dataframe
-        colName:待标准化的字段
-        suffix:处理后的字段后缀
+    :param dataDF:处理数据表，spark dataframe
+    :param fieldNameList:待标准化的字段
+    :param suffix:处理后的字段后缀
+    :return:
     '''
-    des = dataDF.describe(colName).toPandas()
-    for each in colName:
-        func = r"(dataDF."+each+"-"+str(des[each][1])+")"+"/"+str(des[each][2])
+    for each in fieldNameList:
+        columns = dataDF.columns
+        if each not in columns:
+            raise ValueError(each+"字段不存在！")
+    des = dataDF.describe(fieldNameList).toPandas()
+    num = dataDF.count()
+    for each in fieldNameList:
+        func = r"(dataDF."+each+"-"+str(des[each][1])+")"+"/"+str(float(des[each][2])*pow((num-1)/num, 0.5))
         dataDF = dataDF.withColumn(each+'_'+suffix, eval(func))
         dataDF = dataDF.drop(each) # 删除原始列
     return dataDF
 
-def minMaxNormal(dataDF, colName, suffix=r"minMaxNormal"):
+def minMaxNormal(dataDF, fieldNameList, suffix=r"minMaxNormal"):
     '''
     minMaxNormal 归一化
-    对指定的colName，逐一进行归一化
+    对指定的fieldNameList，逐一进行归一化
     只能处理数值型字段
-    Input
-        dataDF:待处理数据表，以后用spark dataframe
-        colName:待标准化的字段
-        suffix:处理后的字段后缀
+    :param dataDF:待处理数据表，以后用spark dataframe
+    :param fieldNameList:待归一化的字段
+    :param suffix:处理后的字段后缀
+    :return:
     '''
-    des = dataDF.describe(colName).toPandas()
-    for each in colName:
+    for each in fieldNameList:
+        columns = dataDF.columns
+        if each not in columns:
+            raise ValueError(each+"字段不存在！")
+    des = dataDF.describe(fieldNameList).toPandas()
+    for each in fieldNameList:
         func = r"(dataDF."+each+"-"+str(des[each][3])+")"+"/("+str(des[each][4])+'-'+str(des[each][3])+')'
-        print(func)
         dataDF = dataDF.withColumn(each+'_'+suffix, eval(func))
         dataDF = dataDF.drop(each) # 删除原始列
     return dataDF
 
-def smooth(dataDF, colName, width=3, stepSize=1, mode=r"mean", suffix=r"smooth"):
+def smooth(dataDF, fieldName, width=3, stepSize=1, mode=r"mean", suffix=r"smooth"):
     '''
     移动平滑
     只能处理数值型字段
-    Input
-        dataDF:暂时用[]，以后用spark dataframe
-        colName:待标准化的字段
-        width:平滑窗口宽度
-        stepSize:步长
-        mode:平滑方式，可选mean\std\min\max
-        suffix:处理后的字段后缀
+    :param dataDF: 待处理数据表
+    :param fieldName:待标准化的字段
+    :param width:平滑窗口宽度
+    :param stepSize:步长
+    :param mode:平滑方式，可选mean\std\min\max
+    :param suffix:
+    :return:
     '''
     mode2index = {"mean":1, "max":4, "min":3, "std":2}
-    assert width>=stepSize
-    dataDF = addIdCol(dataDF, idColName="id_temp_bob")
+    if mode not in mode2index:
+        raise ValueError("mode必须为mean\std\min\max之一")
+    if width<stepSize: # 窗口宽度需要大于等于步长
+        raise ValueError("窗口宽度width不能小于步长stepSize！")
+    if fieldName not in dataDF.columns:
+        raise ValueError("待处理字段不存在！")
+    dataDF = addIdCol(dataDF, idFieldName="id_temp_bob")
     res_list = []
     for i in range(0, dataDF.count(), stepSize):
         temp = dataDF.filter(dataDF.id_temp_bob>=i).filter(dataDF.id_temp_bob<i+width)
         if temp.count()==0:
             break
-        des = temp.describe(colName).toPandas()
-        print(des)
-        res_list.append([float(des[colName][mode2index[mode]])])
-    resDF = spark.createDataFrame(spark.sparkContext.parallelize(res_list), StructType([StructField(colName+"_"+suffix+'_'+mode, FloatType(), True)])) # 标记列
+        des = temp.describe(fieldName).toPandas()
+        res_list.append([float(des[fieldName][mode2index[mode]])])
+    resDF = spark.createDataFrame(spark.sparkContext.parallelize(res_list), StructType([StructField(fieldName+"_"+suffix+'_'+mode, FloatType(), True)])) # 标记列
     return resDF
 
 def sortWith(dataDF, cond):
     '''
     按照表达式升序排序
-    Input
-        dataDF:暂时用[]，以后用spark dataframe
-        cond:排序条件/表达式
-    Case
-        cond = “dataDF.id_temp_bob_smooth_mean”
+    :param dataDF: 待处理数据表
+    :param cond: 排序条件/表达式
+    :return:
     '''
+
     dataDF = dataDF.sort(eval(cond))
     return dataDF
 
@@ -118,59 +128,63 @@ def granularityPartition(dataDF, N, aggMode='mean'):
     '''
     针对数值型数据表，需要指定划分的记录块大小、字段的聚合方式。
     仅仅支持纯数值型表格
-    Input
-        dataDF:暂时用[]，以后用spark dataframe
-        N:块大小
-        aggMode:mean/min/max/sum
-    Case
-        cond = “dataDF.id_temp_bob_smooth_mean”
+    :param dataDF:待处理数据表
+    :param N:块大小
+    :param aggMode:
+    :return:聚合方式，可选mean\std\min\max
     '''
-    dataDF = addIdCol(dataDF, idColName="id_temp_bob")
+    mode2index = {"mean": 1, "max": 4, "min": 3, "std": 2}
+    if aggMode not in mode2index:
+        raise ValueError("aggMode必须为mean\std\min\max之一")
+    dataDF = addIdCol(dataDF, idFieldName="id_temp_bob")
     dataDF = dataDF.withColumn("group_id_temp_bob", floor(dataDF.id_temp_bob/N))
     dataDF = eval("dataDF.groupby('group_id_temp_bob')."+aggMode+"()")
     dataDF = dataDF.drop("id_temp_bob").drop("group_id_temp_bob")
-    return dataDF
+    return dataDF.drop("avg(group_id_temp_bob)").drop("avg(id_temp_bob)")
 
 def multiFieldPartition(dataDF, fieldNameList, aggMode='mean'):
     '''
     针对数值型数据表，按照传入的多个字段，聚合划分数据表
     仅仅支持纯数值型表格
-    Input
-        dataDF:暂时用[]，以后用spark dataframe
-        fieldNameList:用于划分数据块的字段名列表
-        aggMode:mean/min/max/sum
-    Case
-
+    :param dataDF:待处理数据表
+    :param fieldNameList:用于划分数据块的字段名列表
+    :param aggMode:mean/min/max/sum
+    :return:
     '''
+    mode2index = {"mean":1, "max":4, "min":3, "std":2}
+    if aggMode not in mode2index:
+        raise ValueError("aggMode必须为mean\std\min\max之一")
+    for each in fieldNameList:
+        columns = dataDF.columns
+        if each not in columns:
+            raise ValueError(each+"字段不存在！")
     dataDF = eval("dataDF.groupby(fieldNameList)."+aggMode+"()")
     return dataDF
 
 def changeFieldName(dataDF, origName, newName):
     '''
     修改字段名
-    Input
-        dataDF:待处理的数据表
-        origName:原字段名
-        newName:新字段名
+    :param dataDF: 待处理的数据表
+    :param origName: 原字段名
+    :param newName: 新字段名
+    :return:
     '''
-    return dataDF.withColumnRenamed(origName, newName)
 
-def mapFunTest(x):
-    '''
-    Input
-        x:目标字段的数据元素，为字段的数据类型
-    '''
-    return [x+1, x*2]
+    return dataDF.withColumnRenamed(origName, newName)
 
 def mapSingleField2Multi(dataDF, origFieldName, mapFun, newFieldNameList=None):
     '''
     根据传入mapFun，处理指定字段。可将一个字段拆分为多个字段。
-    Input
-        dataDF:待处理的数据表
-        origFieldName:待拆分的字段
-        mapFun:拆分函数
-        newFieldNameList:拆分成的新字段名列表
+    :param dataDF:待处理的数据表
+    :param origFieldName:待拆分的字段
+    :param mapFun:拆分函数。注意：该函数必须保证输出的维度固定
+    :param newFieldNameList:拆分成的新字段名列表
+    :return:
     '''
+
+    if origFieldName not in dataDF.columns:
+        raise ValueError("待处理字段不存在！")
+
     colRdd = dataDF.select(origFieldName).rdd.map(lambda x:mapFun(x[0]))
     colN = len(colRdd.take(1)[0])
     splitedDf = spark.createDataFrame(colRdd)
@@ -180,40 +194,37 @@ def mapSingleField2Multi(dataDF, origFieldName, mapFun, newFieldNameList=None):
     else:
         for i, name in enumerate(newFieldNameList): # 指定新字段名
             splitedDf = changeFieldName(splitedDf, "_"+str(i+1), name)
-    splitedDf = addIdCol(splitedDf, idColName="continuousID")
-    dataDF = addIdCol(dataDF, idColName="continuousID")
+    splitedDf = addIdCol(splitedDf, idFieldName="continuousID")
+    dataDF = addIdCol(dataDF, idFieldName="continuousID")
     dataDF = dataDF.join(splitedDf, dataDF.continuousID==splitedDf.continuousID)
     return dataDF.drop("continuousID")
 
 def createField(dataDF, exp, filedName='new_field'):
     '''
-    针对数值型数据表，需要指定划分的记录块大小、各个字段的聚合方式。
-    仅仅支持纯数值型表格
-    Input
-        dataDF:待处理的数据表spark dataframe
-        exp:新字段表达式
-        convergMode:max/mean/min/sum
-    Case
-
+    利用已有字段构造新字段
+    :param dataDF: 待处理的数据表
+    :param exp: 新字段表达式
+    :param filedName: 新字段名称
+    :return:
     '''
+
     resDF = dataDF.withColumn(filedName, eval(exp))
     return resDF
 
-def sampling(dataDF, sampleMode='equalInterval', randomFraction=0.5, randomSeed=1, equalIntervalStep=3):
+def sampling(dataDF, sampleMode='equalInterval', equalIntervalStep=3, randomFraction=0.5, randomSeed=1):
     '''
     对数据表行抽样
     仅仅支持纯数值型表格
-    Input
-        dataDF:待处理数据表spark dataframe
-        sampleMode:抽样方式。等间隔/随机：equalInterval/random
-        randomFraction:随机抽样-抽样比率
-        randomSeed:随机抽样-随机种子
-        equalIntervalStep:等间隔抽样-间隔
-    Case
-
+    :param dataDF:
+    :param sampleMode: 抽样策略。等间隔/随机：equalInterval/random
+    :param randomFraction:随机抽样-抽样比率
+    :param randomSeed:随机抽样-随机种子
+    :param equalIntervalStep:等间隔抽样-间隔
+    :return:
     '''
+
     if sampleMode=="equalInterval":
-        dataDF = addIdCol(dataDF, idColName="id_temp_bob")
+        dataDF = addIdCol(dataDF, idFieldName="id_temp_bob")
         dataDF = dataDF.withColumn("group_id_temp_bob", dataDF.id_temp_bob%equalIntervalStep)
         dataDF = dataDF.filter(dataDF.group_id_temp_bob==0).drop("group_id_temp_bob").drop("id_temp_bob")
     elif sampleMode=="random":
@@ -226,15 +237,26 @@ def sampling(dataDF, sampleMode='equalInterval', randomFraction=0.5, randomSeed=
 #==============================================================================
 '''
 单元测试
-在hive中必须有测试用表格test.base_comp_main_orig
 '''
-class TestBasicOpera1(unittest.TestCase):
+class TestDataTranster(unittest.TestCase):
     def setUp(self):
         '''
         初始化测试环境
         '''
-        print('创建测试用数据表')
-        self.dataDF = spark.createDataFrame([[i,i*2-1,i*3-1] for i in range(100)])
+        print('生成测试用数据')
+        import numpy as np
+        # 构造测试数据
+        data = [[1,2,3],[4,5,6],[7,8,9],[10,11,12],[13,14,15]]
+        self.dataDF = spark.createDataFrame(data)
+        data2 = [['zhai bo',2,3],['tang bin',5,6],['zhang jing han',8,9],['xie xiao dong',11,12],['zu jie',14,15]]
+        self.dataDF2 = spark.createDataFrame(data2)
+
+        from sklearn import preprocessing
+        scaler = preprocessing.StandardScaler().fit(data)
+        minmax_scale = preprocessing.MinMaxScaler().fit(data)
+        self.data_processed = scaler.transform(data)
+        self.data_minmax = minmax_scale.transform(data)
+        self.granuParTest = np.array([[4, 5, 6], [11.5, 12.5, 13.5]])
 
     def tearDown(self):
         '''
@@ -243,34 +265,129 @@ class TestBasicOpera1(unittest.TestCase):
 #        print('测试结束')
         pass
         
-    def test_selectRow_correctness(self):
+    def test_addIdCol(self):
         '''
-        测试行选择，正确性测试
+        测试添加列
         '''
-        data_res = selectRow(self.dataDF)
-        self.assertTrue(data_res.count()==4)
+        pass # 不需要测试，经常使用
         
-    def test_selectRow_boundary(self):
+    def test_zScoreNormal(self):
         '''
-        测试行选择，行标边界测试，异常测试
+        测试数据标准化
         '''
-        # 行标数超过行数
-        with self.assertRaises(IndexError):
-            selectRow(self.dataDF, rowIndex=list(range(100000)))
-        # 行标为负
-        with self.assertRaises(IndexError):
-            selectRow(self.dataDF, rowIndex=[0,1,-2,3])
-        # 行标过大
-        with self.assertRaises(IndexError):
-            selectRow(self.dataDF, rowIndex=[0,1,2,3, 1000000000])
-        
+        # 接口测试
+
+        # 路径测试
+
+        # 正确性
+        fieldNameList = self.dataDF.columns
+        resDF = zScoreNormal(self.dataDF, fieldNameList)
+        self.assertTrue(sum(sum((np.array(resDF.toPandas())-self.data_processed)**2))<0.1)
+
+    def test_minMaxNormal(self):
+        '''
+        测试数据归一化
+        '''
+        # 接口测试
+
+        # 路径测试
+
+        # 正确性
+        fieldNameList = self.dataDF.columns
+        resDF = minMaxNormal(self.dataDF, fieldNameList)
+        self.assertTrue(sum(sum((np.array(resDF.toPandas())-self.data_minmax)**2))<0.1)
+
+    def test_smooth(self):
+        '''
+        测试数据平滑
+        '''
+        # 接口测试
+        # ----字段不存在
+        with self.assertRaises(ValueError):
+            resDF = smooth(self.dataDF, fieldName='abc')
+        # ----width<stepSize
+        with self.assertRaises(ValueError):
+            resDF = smooth(self.dataDF, fieldName='_1', width=3, stepSize=4)
+        # ----mode不存在
+        with self.assertRaises(ValueError):
+            resDF = smooth(self.dataDF, fieldName='_1', width=3, stepSize=2, mode='count')
+        # 路径测试
+
+        # 正确性
+        fieldNameList = self.dataDF.columns
+        resDF = smooth(self.dataDF, fieldName='_1', mode='mean')
+        resDF = smooth(self.dataDF, fieldName='_1', mode='std')
+        resDF = smooth(self.dataDF, fieldName='_1', mode='min')
+        resDF = smooth(self.dataDF, fieldName='_1', mode='max')
+
+    def test_granularityPartition(self):
+        '''
+        测试数据颗粒度划分
+        '''
+        # 接口测试
+        # ----mode不存在
+        with self.assertRaises(ValueError):
+            resDF = granularityPartition(self.dataDF, N=3, aggMode='count')
+        # 路径测试
+
+        # 正确性
+        fieldNameList = self.dataDF.columns
+        resDF = granularityPartition(self.dataDF, N=3, aggMode='mean')
+        self.assertTrue(sum(sum((np.array(resDF.toPandas())-self.granuParTest)**2))<0.1)
+
+    def test_multiFieldPartition(self):
+        '''
+        测试数据颗粒度划分
+        '''
+        # 接口测试
+        # ----mode不存在
+        with self.assertRaises(ValueError):
+            resDF = multiFieldPartition(self.dataDF, fieldNameList=['_1', '_2'], aggMode='count')
+        # 路径测试
+
+        # 正确性
+        fieldNameList = self.dataDF.columns
+        resDF = multiFieldPartition(self.dataDF, fieldNameList=['_1', '_2'], aggMode='mean')
+        print("test_multiFieldPartition processed", resDF.show())
+
+
+    def test_mapSingleField2Multi(self):
+        '''
+        测试字段拆分
+        '''
+        # 接口测试
+        # ----mode不存在
+        with self.assertRaises(ValueError):
+            resDF = mapSingleField2Multi(self.dataDF2, origFieldName='abc', mapFun=lambda x:x)
+        # 路径测试
+
+        # 正确性
+        resDF = mapSingleField2Multi(self.dataDF2, origFieldName="_1", mapFun=lambda x:x.split()[:2])
+        resDF = mapSingleField2Multi(self.dataDF2, origFieldName="_1", mapFun=lambda x: x.split()[:2], newFieldNameList=["first_name", "sec_name"])
+        print("test_mapSingleField2Multi processed data",resDF.show())
+        resDF = mapSingleField2Multi(self.dataDF2, origFieldName="_2", mapFun=lambda x: [x*3, x**2], newFieldNameList=["first_name", "sec_name"])
+
+    def test_sampling(self):
+        '''
+        测试抽样
+        '''
+        # 接口测试
+        # ----mode不存在
+        with self.assertRaises(KeyError):
+            resDF = sampling(self.dataDF, sampleMode='abc')
+        # 路径测试
+
+        # 正确性
+        resDF = sampling(self.dataDF)
+        resDF = sampling(self.dataDF, sampleMode='random')
+
 if __name__=="__main__":
-    from pyspark.sql import SparkSession
-    spark=SparkSession \
-    .builder \
-    .appName('bob_app') \
-    .getOrCreate()
-    spark.sparkContext.addPyFile("/usr/hdp/current/hive_warehouse_connector/pyspark_hwc-1.0.0.3.1.0.0-78.zip") # 导入依赖的模块
-    spark.sparkContext.addPyFile("/home/hdfs/bob/packages/dataInterface.py") # 导入依赖的模块
+    # from pyspark.sql import SparkSession
+    # spark=SparkSession \
+    # .builder \
+    # .appName('bob_app') \
+    # .getOrCreate()
+    # spark.sparkContext.addPyFile("/usr/hdp/current/hive_warehouse_connector/pyspark_hwc-1.0.0.3.1.0.0-78.zip") # 导入依赖的模块
+    # spark.sparkContext.addPyFile("/home/hdfs/bob/packages/dataInterface.py") # 导入依赖的模块
     unittest.main()
     

@@ -4,14 +4,15 @@ Created on Mon Mar 11 16:12:06 2019
 
 @author: bob
 """
-
+import warnings
+warnings.filterwarnings('ignore')
 import unittest
 from pyspark.sql import SparkSession
 from pyspark.sql import Window
 from pyspark.sql.functions import monotonically_increasing_id, row_number
 from pyspark.sql.types import StructType, StructField, LongType, StringType  # 导入类型
 
-from dataInterface import HiveInterface
+# from dataInterface import HiveInterface
 
 spark=SparkSession \
 .builder \
@@ -30,6 +31,9 @@ spark=SparkSession \
 def addIdCol(dataDF, idColName="continuousID"):
     '''
     添加连续递增id列
+    :param dataDF: 数据表; DataFrame
+    :param idColName: id列名
+    :return: 增加id列的数据表; DataFrame
     '''
     numParitions = dataDF.rdd.getNumPartitions() # 获取分区数
     data_withindex = dataDF.withColumn("increasing_id_temp", monotonically_increasing_id()) # 添加递增列
@@ -39,38 +43,42 @@ def addIdCol(dataDF, idColName="continuousID"):
     data_withindex = data_withindex.drop("increasing_id_temp") # 删除临时生成的递增列
     return data_withindex
 
-def selectRow(dataDF, rowIndex=[1,2,3,4]):
+def selectRow(dataDF, tagDF, haveIdCol=False, idColName=None, tagName=None):
     '''
     选择数据的指定行
-    Input
-        rowIndex:暂时用[]，以后用spark dataframe
+    :param dataDF: 数据表; DataFrame
+    :param tagDF: 标识表，标识了待选择行的索引; DataFrame
+    :return: 选择后的数据表; DataFrame
     '''
-    # 异常输入检测
-    if rowIndex==[]:
-        return dataDF
+    # 接口检测
+    if type(spark.createDataFrame([[1]])) != type(tagDF):
+        raise ValueError("标识表必须为spark DataFrame！")
+
+    if len(tagDF.columns)!=1 and not haveIdCol:
+        raise ValueError("标识表只能为单列表！")
+    tagName = tagDF.columns[0]
     rowN = dataDF.count()
-    # 边界检测，行标是否符合规定,raise IndexError("行标越界")
-    if len(rowIndex)>rowN:
-        raise IndexError("指定筛选的行标数超过数据表总行数！")
-    if min(rowIndex)<0 or max(rowIndex)>rowN-1:
-        raise IndexError("行标越界！")
-    # 对dataDf添加索引列
+    tagRow = tagDF.count()
+    # 异常输入检测
+    if tagRow==0:
+        return dataDF
+
+    # 边界检测，行标是否符合规定
+    if tagRow!=rowN:
+        raise IndexError("输入的标识表行数应当与数据表一致！")
+
+    # 对dataDf添加id列
     data_withindex = addIdCol(dataDF,idColName="id_left_temp_bob")
 
-    # 生成行选择标签表
-    select_flag = [[0]]*rowN
-    for each in rowIndex:
-        select_flag[each] = [1]
-    selectRow_flag_bob = spark.createDataFrame(spark.sparkContext.parallelize(select_flag), 
-                                        StructType([StructField("selectRow_flag_bob", LongType(), True)])) # 标记列
-    # selectRow_flag_bob.show()
-    select_flag_withindex = addIdCol(selectRow_flag_bob, idColName="id_right_temp_bob")
-    # 以索引为主键拼接dataDF和标记表
+    # 生tagDF添加id列
+    select_flag_withindex = addIdCol(tagDF, idColName="id_right_temp_bob")
+
+    # 以id为主键拼接dataDF和标记表
     # print(select_flag_withindex.count())
     data_withindex2 = data_withindex.join(select_flag_withindex, data_withindex.id_left_temp_bob==select_flag_withindex.id_right_temp_bob)
     # 按照选择标记筛选行
     # print(data_withindex2.show())
-    data_filtered = data_withindex2.filter(data_withindex2.selectRow_flag_bob>0)
+    data_filtered = data_withindex2.filter(eval("data_withindex2."+tagName+">0"))
     # print(data_filtered.count())
     # 删除id_temp和标识行
     data_res = data_filtered.drop("id_left_temp_bob").drop("id_right_temp_bob")
@@ -78,6 +86,56 @@ def selectRow(dataDF, rowIndex=[1,2,3,4]):
     # print(data_res.show(1))
     return data_res
 
+# def selectRow(dataDF, rowIndex=[1,2,3,4]):
+#     '''
+#     选择数据的指定行
+#     :param dataDF: 数据表; DataFrame
+#     :param rowIndex: 标识了待选择行的索引; DataFrame
+#     :return: 选择后的数据表; DataFrame
+#     '''
+#     # 异常输入检测
+#     if rowIndex==[]:
+#         return dataDF
+#     rowN = dataDF.count()
+#     # 边界检测，行标是否符合规定,raise IndexError("行标越界")
+#     if len(rowIndex)>rowN:
+#         raise IndexError("指定筛选的行标数超过数据表总行数！")
+#     if min(rowIndex)<0 or max(rowIndex)>rowN-1:
+#         raise IndexError("行标越界！")
+#     # 对dataDf添加索引列
+#     data_withindex = addIdCol(dataDF,idColName="id_left_temp_bob")
+#
+#     # 生成行选择标签表
+#     select_flag = [[0]]*rowN
+#     for each in rowIndex:
+#         select_flag[each] = [1]
+#     selectRow_flag_bob = spark.createDataFrame(spark.sparkContext.parallelize(select_flag),
+#                                         StructType([StructField("selectRow_flag_bob", LongType(), True)])) # 标记列
+#     # selectRow_flag_bob.show()
+#     select_flag_withindex = addIdCol(selectRow_flag_bob, idColName="id_right_temp_bob")
+#     # 以索引为主键拼接dataDF和标记表
+#     # print(select_flag_withindex.count())
+#     data_withindex2 = data_withindex.join(select_flag_withindex, data_withindex.id_left_temp_bob==select_flag_withindex.id_right_temp_bob)
+#     # 按照选择标记筛选行
+#     # print(data_withindex2.show())
+#     data_filtered = data_withindex2.filter(data_withindex2.selectRow_flag_bob>0)
+#     # print(data_filtered.count())
+#     # 删除id_temp和标识行
+#     data_res = data_filtered.drop("id_left_temp_bob").drop("id_right_temp_bob")
+#     # data_res.show()
+#     # print(data_res.show(1))
+#     return data_res
+
+
+def changeFieldName(dataDF, origName, newName):
+    '''
+    修改字段名
+    Input
+        dataDF:待处理的数据表
+        origName:原字段名
+        newName:新字段名
+    '''
+    return dataDF.withColumnRenamed(origName, newName)
 
 def filterRow(dataDF, cond):
     '''
@@ -85,20 +143,21 @@ def filterRow(dataDF, cond):
     条件表达式：一个Bool类型的Column，或者SQL字符串表达式
     '''
     return dataDF.filter(cond)
-    
 
+#==============================================================================
+#==============================================================================
 '''
 单元测试
-在hive中必须有测试用表格test.base_comp_main_orig
 '''
 class TestBasicOpera1(unittest.TestCase):
     def setUp(self):
         '''
         初始化测试环境
         '''
-        print('连接测试用数据')
-        hif = HiveInterface()
-        self.dataDF = hif.linkHiveTable(limitN=30)
+        print('生成测试用数据')
+        import numpy as np
+        data = np.ones((10000,5)).tolist()
+        self.dataDF = spark.createDataFrame(data)
         
     def tearDown(self):
         '''
@@ -111,28 +170,45 @@ class TestBasicOpera1(unittest.TestCase):
         '''
         测试行选择，正确性测试
         '''
-        data_res = selectRow(self.dataDF)
-        data_res = data_res.select(data_res.company_id)
-
-        print(data_res.show())
-        print("======================")
-        print(data_res.count())
-        print("======================")
-        self.assertTrue(True)
+        tag_list = [[0]] * self.dataDF.count()
+        tag_list[0] = [1] # 选择第一行
+        tagDF = spark.createDataFrame(tag_list)
+        tagDF = changeFieldName(tagDF, '_1', 'tag')
+        resDF = selectRow(self.dataDF, tagDF)
+        self.assertTrue(resDF.count()==1)
         
     def test_selectRow_boundary(self):
         '''
         测试行选择，行标边界测试，异常测试
         '''
-        # 行标数超过行数
+        # tagDF行数超过dataDF行数
         with self.assertRaises(IndexError):
-            selectRow(self.dataDF, rowIndex=list(range(100000)))
-        # 行标为负
+            tag_list = [[0]] * (self.dataDF.count()+1)
+            tag_list[0] = [1]  # 选择第一行
+            tagDF = spark.createDataFrame(tag_list)
+            tagDF = changeFieldName(tagDF, '_1', 'tag')
+            resDF = selectRow(self.dataDF, tagDF)
+        # tagDF行数小于dataDF行数
         with self.assertRaises(IndexError):
-            selectRow(self.dataDF, rowIndex=[0,1,-2,3])
-        # 行标过大
-        with self.assertRaises(IndexError):
-            selectRow(self.dataDF, rowIndex=[0,1,2,3, 1000000000])
+            tag_list = [[0]] * (self.dataDF.count()-1)
+            tag_list[0] = [1]  # 选择第一行
+            tagDF = spark.createDataFrame(tag_list)
+            tagDF = changeFieldName(tagDF, '_1', 'tag')
+            resDF = selectRow(self.dataDF, tagDF)
+
+    def test_selectRow_tagDF(self):
+        '''
+        测试行选择，测试tagDF参数检查
+        '''
+        # tagDF为非dataframe
+        with self.assertRaises(ValueError):
+            resDF = selectRow(self.dataDF, [1,2,3,4])
+        # tagDF有多列
+        with self.assertRaises(ValueError):
+            tag_list = [[0, 1]] * (self.dataDF.count())
+            tagDF = spark.createDataFrame(tag_list)
+            tagDF = changeFieldName(tagDF, '_1', 'tag')
+            resDF = selectRow(self.dataDF, tagDF)
             
     def test_filterRow(self):
         '''
@@ -140,15 +216,22 @@ class TestBasicOpera1(unittest.TestCase):
         '''
         # 无需测试
         pass
-            
+
+    def test_changeFieldName(self):
+        '''
+        测试修改列名
+        '''
+        # 无需测试
+        pass
+
 if __name__=="__main__":
-    from pyspark.sql import SparkSession
-    spark=SparkSession \
-    .builder \
-    .appName('bob_app') \
-    .getOrCreate()
-    spark.sparkContext.addPyFile("/usr/hdp/current/hive_warehouse_connector/pyspark_hwc-1.0.0.3.1.0.0-78.zip") # 导入依赖的模块
-    spark.sparkContext.addPyFile("/home/hdfs/bob/packages/dataInterface.py") # 导入依赖的模块
+    # from pyspark.sql import SparkSession
+    # spark=SparkSession \
+    # .builder \
+    # .appName('bob_app') \
+    # .getOrCreate()
+    # spark.sparkContext.addPyFile("/usr/hdp/current/hive_warehouse_connector/pyspark_hwc-1.0.0.3.1.0.0-78.zip") # 导入依赖的模块
+    # spark.sparkContext.addPyFile("/home/hdfs/bob/packages/dataInterface.py") # 导入依赖的模块
     unittest.main()
      
     
