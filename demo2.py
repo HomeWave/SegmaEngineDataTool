@@ -47,6 +47,7 @@ print(maxcounttable.columns)
 maxcounttable = dataBasicOpera.changeFieldName(maxcounttable, 'max(countN)', 'countN')
 # 根据maxcounttable获得最终结果
 data = dataBasicOpera.selectRowByPartField(data, maxcounttable)
-data.show()
+data.show(1000)
+hi.saveAsHiveTable(data,databaseName="test", tableName="industry_cluster_city")
 
 

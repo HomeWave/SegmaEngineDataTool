@@ -372,7 +372,7 @@ class TestcheckInvalidData(unittest.TestCase):
         a, b = checkInvalidRow(test, 9999)
         c, d = checkInvalidCol(test, 0)
         self.assertTrue(a == 0)
-        self.assertTrue(b.dtypes == [('invalidRow', 'int'), ('continuousID', 'int')])
+        self.assertTrue(b.dtypes == [('invalidRow', 'int')])
         self.assertTrue(c == 3)
         self.assertTrue(d.dtypes == [('invalidColName', 'string'), ('ContinuesID', 'int')])
 
