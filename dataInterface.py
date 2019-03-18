@@ -15,13 +15,14 @@ import unittest
 spark-Hive连接接口
 '''
 class HiveInterface():
-    def __init__(self, hiveurl=r"jdbc:hive2://hdp-master2:10500", hiveuser=r"hive", hivepassword=r""):
+    def __init__(self, hiveuser=r"hive", hivepassword=r""):
         self.spark=SparkSession \
         .builder \
-        .appName('bob_app') \
+        .appName('dataInterface') \
         .getOrCreate()
+        self.spark.conf.set("hive.llap.daemon.service.hosts","@llap0")
         #spark.sparkContext.addFile("/usr/hdp/current/hive_warehouse_connector/pyspark_hwc-1.0.0.3.1.0.0-78.zip")
-        self.hive = HiveWarehouseSession.session(self.spark).hs2url(hiveurl).userPassword(hiveuser, hivepassword).build()
+        self.hive = HiveWarehouseSession.session(self.spark).userPassword(hiveuser, hivepassword).build()
 
     def linkHiveTable(self, databaseName='test', tableName='base_comp_main_orig', limitN=None, colName=[]):
         '''
@@ -84,4 +85,8 @@ class TestHiveInterface(unittest.TestCase):
     
         
 if __name__=="__main__":
+    # from pyspark_llap.sql.session import HiveWarehouseSession
+    # spark.conf.set("hive.llap.daemon.service.hosts","@llap0")
+    # hive = HiveWarehouseSession.session(spark).hs2url("jdbc:hive2://hdp-master2:10500").userPassword("hive", "").build()
+
     unittest.main()

@@ -1,16 +1,9 @@
 #!/usr/bin/env python 
 # -*- coding:utf-8 -*-
-import pandas as pd
-from pyspark import SparkContext
-from pyspark.sql import SQLContext
+import warnings
+warnings.filterwarnings('ignore')
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import udf, col
-from pyspark.sql.types import IntegerType
-from pyspark.sql.types import IntegerType
-from pyspark.sql import functions as F
 from pyspark.sql.functions import isnan, isnull
-from pyspark.sql import Window
-from pyspark.sql.functions import monotonically_increasing_id, row_number
 import unittest
 
 spark = SparkSession.builder .appName('my_first_app_name').getOrCreate()
@@ -158,7 +151,8 @@ class Test_nanProcess(unittest.TestCase):
         result4 = nanProcess(self.dataDF, "a", "Filling_Manually", 2.0)
         num_null_nan4 = result4.filter(result4["a"].isNull()).count() + result4.filter(isnan("a")).count()
         self.assertEqual(num_null_nan4, 0)
-
+if __name__ == '__main__':
+    unittest.main()
 
 
 

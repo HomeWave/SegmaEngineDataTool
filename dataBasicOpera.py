@@ -10,44 +10,16 @@ import unittest
 from pyspark.sql import SparkSession
 from pyspark.sql import Window
 from pyspark.sql.functions import monotonically_increasing_id, row_number
-from pyspark.sql.types import StructType, StructField, LongType, StringType  # 导入类型
-
-# from dataInterface import HiveInterface
-
 spark=SparkSession \
 .builder \
-.appName('bob_app') \
+.appName('basicOpera') \
 .getOrCreate()
-
-
-
-#class CustomError(Exception): 
-#    def __init__(self,ErrorInfo): 
-#        super().__init__(self) #初始化父类 
-#        self.errorinfo=ErrorInfo 
-#    def __str__(self): 
-#        return self.errorinfo
-
-def addIdCol(dataDF, idColName="continuousID"):
-    '''
-    添加连续递增id列
-    :param dataDF: 数据表; DataFrame
-    :param idColName: id列名
-    :return: 增加id列的数据表; DataFrame
-    '''
-    numParitions = dataDF.rdd.getNumPartitions() # 获取分区数
-    data_withindex = dataDF.withColumn("increasing_id_temp", monotonically_increasing_id()) # 添加递增列
-    data_withindex = data_withindex.withColumn(idColName, row_number().over(Window.orderBy("increasing_id_temp"))-1) # 生成连续递增id列，此时分区数为1
-    data_withindex = data_withindex.repartition(numParitions) # 按原分区数重新分区，所以不用紧张前面分区数变为1时报出的性能降低警告
-    data_withindex = data_withindex.sort("increasing_id_temp") # 由于重分区后会打乱顺序，需重新排序
-    data_withindex = data_withindex.drop("increasing_id_temp") # 删除临时生成的递增列
-    return data_withindex
 
 def selectRow(dataDF, tagDF, haveIdCol=False, idColName=None, tagName=None):
     '''
     选择数据的指定行
     :param dataDF: 数据表; DataFrame
-    :param tagDF: 标识表，标识了待选择行的索引; DataFrame
+    :param tagDF: 标识表，标识了待选择行; DataFrame
     :return: 选择后的数据表; DataFrame
     '''
     # 接口检测
@@ -68,10 +40,10 @@ def selectRow(dataDF, tagDF, haveIdCol=False, idColName=None, tagName=None):
         raise IndexError("输入的标识表行数应当与数据表一致！")
 
     # 对dataDf添加id列
-    data_withindex = addIdCol(dataDF,idColName="id_left_temp_bob")
+    data_withindex = addIdCol(dataDF,idFieldName="id_left_temp_bob")
 
     # 生tagDF添加id列
-    select_flag_withindex = addIdCol(tagDF, idColName="id_right_temp_bob")
+    select_flag_withindex = addIdCol(tagDF, idFieldName="id_right_temp_bob")
 
     # 以id为主键拼接dataDF和标记表
     # print(select_flag_withindex.count())
@@ -79,6 +51,49 @@ def selectRow(dataDF, tagDF, haveIdCol=False, idColName=None, tagName=None):
     # 按照选择标记筛选行
     # print(data_withindex2.show())
     data_filtered = data_withindex2.filter(eval("data_withindex2."+tagName+">0"))
+    # print(data_filtered.count())
+    # 删除id_temp和标识行
+    data_res = data_filtered.drop("id_left_temp_bob").drop("id_right_temp_bob")
+    # data_res.show()
+    # print(data_res.show(1))
+    return data_res
+
+def deleteRow(dataDF, tagDF, haveIdCol=False, idColName=None, tagName=None):
+    '''
+    删除数据的指定行
+    :param dataDF: 数据表; DataFrame
+    :param tagDF: 标识表，标识了待删除行; DataFrame
+    :return: 选择后的数据表; DataFrame
+    '''
+    # 接口检测
+    if type(spark.createDataFrame([[1]])) != type(tagDF):
+        raise ValueError("标识表必须为spark DataFrame！")
+
+    if len(tagDF.columns)!=1 and not haveIdCol:
+        raise ValueError("标识表只能为单列表！")
+    tagName = tagDF.columns[0]
+    rowN = dataDF.count()
+    tagRow = tagDF.count()
+    # 异常输入检测
+    if tagRow==0:
+        return dataDF
+
+    # 边界检测，行标是否符合规定
+    if tagRow!=rowN:
+        raise IndexError("输入的标识表行数应当与数据表一致！")
+
+    # 对dataDf添加id列
+    data_withindex = addIdCol(dataDF,idFieldName="id_left_temp_bob")
+
+    # 生tagDF添加id列
+    select_flag_withindex = addIdCol(tagDF, idFieldName="id_right_temp_bob")
+
+    # 以id为主键拼接dataDF和标记表
+    # print(select_flag_withindex.count())
+    data_withindex2 = data_withindex.join(select_flag_withindex, data_withindex.id_left_temp_bob==select_flag_withindex.id_right_temp_bob)
+    # 按照选择标记筛选行
+    # print(data_withindex2.show())
+    data_filtered = data_withindex2.filter(eval("data_withindex2."+tagName+"==0"))
     # print(data_filtered.count())
     # 删除id_temp和标识行
     data_res = data_filtered.drop("id_left_temp_bob").drop("id_right_temp_bob")
@@ -144,6 +159,62 @@ def filterRow(dataDF, cond):
     '''
     return dataDF.filter(cond)
 
+def selectCol(dataDF, fieldNameList):
+    '''
+    选择列
+    '''
+    return dataDF.select(fieldNameList)
+
+def deleteCol(dataDF, fieldNameList):
+    '''
+    删除列
+    '''
+    for each in fieldNameList:
+        dataDF = dataDF.drop(each)
+    return dataDF
+
+def addIdCol(dataDF, idFieldName="continuousID"):
+    '''
+    添加连续递增id列
+    :param dataDF: 数据表; DataFrame
+    :param idFieldName: id列名
+    :return: 增加id列的数据表; DataFrame
+    '''
+    numParitions = dataDF.rdd.getNumPartitions() # 获取分区数
+    data_withindex = dataDF.withColumn("increasing_id_temp", monotonically_increasing_id()) # 添加递增列
+    data_withindex = data_withindex.withColumn(idFieldName, row_number().over(Window.orderBy("increasing_id_temp"))-1) # 生成连续递增id列，此时分区数为1
+    data_withindex = data_withindex.repartition(numParitions) # 按原分区数重新分区，所以不用紧张前面分区数变为1时报出的性能降低警告
+    data_withindex = data_withindex.sort("increasing_id_temp") # 由于重分区后会打乱顺序，需重新排序
+    data_withindex = data_withindex.drop("increasing_id_temp") # 删除临时生成的递增列
+    return data_withindex
+
+def selectRowByPartField(dataDF, partValueDF):
+    '''
+    利用部分字段值，匹配选择数据
+    :param dataDF: 数据表; DataFrame
+    :param partValueDF: 包含部分字段的数据表
+    :return: 选择后的数据表; DataFrame
+    '''
+    # 接口检测
+    if type(spark.createDataFrame([[1]])) != type(partValueDF):
+        raise ValueError("输入表必须为spark DataFrame！")
+    col1 = dataDF.columns
+    col2 = partValueDF.columns
+    for each in col2:
+        if each not in col1:
+            raise KeyError(each+"字段在数据表中不存在！")
+    col3 = [each+'_1' for each in col2]
+    changelist = []
+    exp = "dataDF"
+    exp_d = "dataDF"
+    for i, each in enumerate(col3):
+        changelist.append(col2[i]+" as "+col3[i]) # 修改列名
+        exp += ".filter(dataDF."+col2[i]+"==dataDF."+col3[i]+")"
+        exp_d += ".drop('"+col3[i]+"')"
+    partValueDF = partValueDF.selectExpr(changelist)
+    dataDF = dataDF.join(partValueDF, eval("dataDF."+col2[0]+'==partValueDF.'+col3[0]))
+    dataDF = eval(exp)
+    return eval(exp_d)
 #==============================================================================
 #==============================================================================
 '''
@@ -223,6 +294,14 @@ class TestBasicOpera1(unittest.TestCase):
         '''
         # 无需测试
         pass
+
+    def test_selectRowByPartField(self):
+        '''
+        测试根据部分字段选择数据行
+        '''
+        #
+        res = selectRowByPartField(spark.createDataFrame([[1,2,3,4],[3,5,6,7]]), spark.createDataFrame([[1,2],[3,4]]))
+        print(res.show())
 
 if __name__=="__main__":
     # from pyspark.sql import SparkSession

@@ -12,33 +12,13 @@ from pyspark.sql.functions import monotonically_increasing_id, floor, row_number
 from pyspark.sql.types import StructType, StructField, LongType, FloatType, StringType  # 导入类型
 from pyspark.sql import Window
 import numpy as np
+from dataBasicOpera import changeFieldName, addIdCol
 
 spark=SparkSession \
 .builder \
-.appName('bob_app') \
+.appName('dataTranster') \
 .getOrCreate()
 
-#class CustomError(Exception): 
-#    def __init__(self,ErrorInfo): 
-#        super().__init__(self) #初始化父类 
-#        self.errorinfo=ErrorInfo 
-#    def __str__(self): 
-#        return self.errorinfo
-
-def addIdCol(dataDF, idFieldName="continuousID"):
-    '''
-    添加连续递增id列
-    :param dataDF: 待处理数据表，spark dataframe
-    :param idFieldName: id列名
-    :return:
-    '''
-    numParitions = dataDF.rdd.getNumPartitions() # 获取分区数
-    data_withindex = dataDF.withColumn("increasing_id_temp", monotonically_increasing_id()) # 添加递增列
-    data_withindex = data_withindex.withColumn(idFieldName, row_number().over(Window.orderBy("increasing_id_temp"))-1) # 生成连续递增id列，此时分区数为1
-    data_withindex = data_withindex.repartition(numParitions) # 按原分区数重新分区，所以不用紧张前面分区数变为1时报出的性能降低警告
-    data_withindex = data_withindex.sort("increasing_id_temp") # 由于重分区后会打乱顺序，需重新排序
-    data_withindex = data_withindex.drop("increasing_id_temp") # 删除临时生成的递增列
-    return data_withindex
 
 def zScoreNormal(dataDF, fieldNameList, suffix=r"zScoreNormal"):
     '''
@@ -131,46 +111,41 @@ def granularityPartition(dataDF, N, aggMode='mean'):
     :param dataDF:待处理数据表
     :param N:块大小
     :param aggMode:
-    :return:聚合方式，可选mean\std\min\max
+    :return:聚合方式，可选mean/std/min/max/count
     '''
-    mode2index = {"mean": 1, "max": 4, "min": 3, "std": 2}
+    mode2index = {"mean": 1, "max": 4, "min": 3, "std": 2, "count":0}
     if aggMode not in mode2index:
-        raise ValueError("aggMode必须为mean\std\min\max之一")
+        raise ValueError("aggMode必须为mean\std\min\max\count之一")
     dataDF = addIdCol(dataDF, idFieldName="id_temp_bob")
     dataDF = dataDF.withColumn("group_id_temp_bob", floor(dataDF.id_temp_bob/N))
     dataDF = eval("dataDF.groupby('group_id_temp_bob')."+aggMode+"()")
     dataDF = dataDF.drop("id_temp_bob").drop("group_id_temp_bob")
+    dataDF = changeFieldName(dataDF, "count", "countN")
     return dataDF.drop("avg(group_id_temp_bob)").drop("avg(id_temp_bob)")
 
 def multiFieldPartition(dataDF, fieldNameList, aggMode='mean'):
     '''
     针对数值型数据表，按照传入的多个字段，聚合划分数据表
-    仅仅支持纯数值型表格
+    mean/min/max/sum aggMode仅仅支持纯数值型表格
     :param dataDF:待处理数据表
     :param fieldNameList:用于划分数据块的字段名列表
-    :param aggMode:mean/min/max/sum
+    :param aggMode:mean/min/max/sum/count
     :return:
     '''
-    mode2index = {"mean":1, "max":4, "min":3, "std":2}
+    mode2index = {"mean": 1, "max": 4, "min": 3, "std": 2, "count": 0}
     if aggMode not in mode2index:
-        raise ValueError("aggMode必须为mean\std\min\max之一")
+        raise ValueError("aggMode必须为mean\std\min\max\count之一")
+    columns = dataDF.columns
     for each in fieldNameList:
-        columns = dataDF.columns
         if each not in columns:
             raise ValueError(each+"字段不存在！")
-    dataDF = eval("dataDF.groupby(fieldNameList)."+aggMode+"()")
+    exp = "dataDF.groupby(fieldNameList)."+aggMode+"()"
+    if aggMode=='count':
+        dataDF = dataDF.groupby(fieldNameList).count()
+    else:
+        dataDF = eval(exp)
+    dataDF = changeFieldName(dataDF, "count", "countN") # 将count改为countN，避免和count()混淆
     return dataDF
-
-def changeFieldName(dataDF, origName, newName):
-    '''
-    修改字段名
-    :param dataDF: 待处理的数据表
-    :param origName: 原字段名
-    :param newName: 新字段名
-    :return:
-    '''
-
-    return dataDF.withColumnRenamed(origName, newName)
 
 def mapSingleField2Multi(dataDF, origFieldName, mapFun, newFieldNameList=None):
     '''
