@@ -78,11 +78,11 @@ def checkInvalidRow(dataDF, threshold):
     invalidnum = tagDF.filter(tagDF.isInvalid==True).count()
     return invalidnum, tagDF
 
-def checkInvalidCol(dataDF,threshold):
+def checkInvalidCol(dataDF, threshold):
     '''
     :param dataDF: 数据表; DataFrame
     :param threshold:空值(Null/Nan)阈值;float or int
-    :return:无效列个数，含有大于阈值的无效列列名和连续递增ID的DataFrame
+    :return:无效列个数,invalidnum，无效列名,invalidname
     '''
     if type(threshold) is not float and type(threshold) is not int:
         raise TypeError('Invalid threshold')
@@ -92,20 +92,20 @@ def checkInvalidCol(dataDF,threshold):
     miss2 = dataDF.agg(*[(fn.count('*')-fn.count(value)).alias(value) for value in dataDF.columns]).toPandas()
     invalidname = []
     invalidnum = 0
-    if threshold <= 1 & threshold >= 0:
+    if (threshold <= 1) and (threshold >= 0):
         for value in miss1.columns:
             if float(miss1[value]) > threshold:
                 invalidname.append([value, invalidnum])
                 invalidnum += 1
         schema = typ.StructType([typ.StructField('invalidColName', typ.StringType(), True), typ.StructField('ContinuesID', typ.IntegerType(), True)])
-        invalidname = spark.createDataFrame(invalidname,schema=schema)
+        # invalidname = spark.createDataFrame(invalidname,schema=schema)
     else:
         for value in miss2.columns:
             if float(miss2[value])>threshold:
                 invalidname.append([value,invalidnum])
                 invalidnum += 1
         schema = typ.StructType([typ.StructField('invalidColName',typ.StringType(),True),typ.StructField('continuousID', typ.IntegerType(),True)])
-        invalidname = spark.createDataFrame(invalidname,schema=schema)
+        # invalidname = spark.createDataFrame(invalidname,schema=schema)
     return invalidnum, invalidname
 
 
@@ -373,7 +373,6 @@ class TestcheckInvalidData(unittest.TestCase):
         c, d = checkInvalidCol(test, 0)
         self.assertTrue(a == 0)
         self.assertTrue(c == 3)
-        self.assertTrue(d.dtypes == [('invalidColName', 'string'), ('ContinuesID', 'int')])
 
 class TestcheckDuplicateData(unittest.TestCase):
 
