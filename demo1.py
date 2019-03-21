@@ -8,8 +8,6 @@ Created on Wed Mar  6 20:42:26 2019
 # demo--生产工艺数据处理
 '''
 
-import numpy as np
-import pandas as pd
 import dataInterface, dataCleaning, dataTransfer, dataBasicOpera # 导入组件
 
 # 创建一个Hive连接
