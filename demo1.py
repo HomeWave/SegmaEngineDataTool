@@ -40,5 +40,5 @@ print("处理结果")
 data.show(10)
 # 保存到Hive
 hi.saveAsHiveTable(data,databaseName="test", tableName="vcalsegment1712_txt_processed")
-
+print("成功！")
 
