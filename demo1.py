@@ -8,15 +8,9 @@ Created on Wed Mar  6 20:42:26 2019
 # demo--生产工艺数据处理
 '''
 
-from pyspark.sql import SparkSession
 import numpy as np
 import pandas as pd
-spark=SparkSession.builder.appName('dataTranster').getOrCreate()
-spark.sparkContext.addPyFile("/home/hdfs/bob/packages/dataInterface.py") # 导入依赖的模块
-spark.sparkContext.addPyFile("/home/hdfs/bob/packages/dataBasicOpera.py") # 导入依赖的模块
-spark.sparkContext.addPyFile("/home/hdfs/bob/packages/dataCleaning.py") # 导入依赖的模块
-spark.sparkContext.addPyFile("/home/hdfs/bob/packages/dataTransfer.py") # 导入依赖的模块
-import dataInterface, dataCleaning, dataTransfer, dataBasicOpera
+import dataInterface, dataCleaning, dataTransfer, dataBasicOpera # 导入组件
 
 # 创建一个Hive连接
 hi = dataInterface.HiveInterface()
