@@ -4,11 +4,12 @@ Created on Wed Mar  6 20:42:26 2019
 
 @author: bob
 """
+# pyspark_hwc_path 路径可能变化。该地址用于指定python依赖pyspark_hwc的位置
+pyspark_hwc_path = "/usr/hdp/current/hive_warehouse_connector/pyspark_hwc-1.0.0.3.1.0.0-78.zip"
 import warnings
 warnings.filterwarnings('ignore')
 # 初始化sparkSession和HiveSession
 from pyspark.sql import SparkSession
-from pyspark_llap.sql.session import HiveWarehouseSession
 import unittest
 
 '''
@@ -21,7 +22,8 @@ class HiveInterface():
         .appName('dataInterface') \
         .getOrCreate()
         self.spark.conf.set("hive.llap.daemon.service.hosts","@llap0")
-        #spark.sparkContext.addFile("/usr/hdp/current/hive_warehouse_connector/pyspark_hwc-1.0.0.3.1.0.0-78.zip")
+        self.spark.sparkContext.addPyFile(pyspark_hwc_path)
+        from pyspark_llap.sql.session import HiveWarehouseSession
         self.hive = HiveWarehouseSession.session(self.spark).userPassword(hiveuser, hivepassword).build()
 
     def linkHiveTable(self, databaseName='test', tableName='base_comp_main_orig', limitN=None, colName=[]):
@@ -55,6 +57,7 @@ class HiveInterface():
         Output
             
         '''
+        from pyspark_llap.sql.session import HiveWarehouseSession
         dataDF.write.format(HiveWarehouseSession.HIVE_WAREHOUSE_CONNECTOR).\
         mode(saveMode=saveMode).option("table", databaseName+'.'+tableName).save()
         return True
