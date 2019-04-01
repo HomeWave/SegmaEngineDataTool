@@ -96,7 +96,7 @@ def deleteRow(dataDF, tagDF, haveIdCol=False, idColName=None, tagName=None):
     data_filtered = data_withindex2.filter(eval("data_withindex2."+tagName+"==0"))
     # print(data_filtered.count())
     # 删除id_temp和标识行
-    data_res = data_filtered.drop("id_left_temp_bob").drop("id_right_temp_bob")
+    data_res = data_filtered.drop("id_left_temp_bob").drop("id_right_temp_bob").drop(tagDF.columns[0])
     # data_res.show()
     # print(data_res.show(1))
     return data_res

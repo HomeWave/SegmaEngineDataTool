@@ -24,7 +24,7 @@ data = dataBasicOpera.deleteCol(data, fieldNameList=invalidname)
 # print("离群值数量%s"%nums)
 # print("删除离群值后")
 # data.show(10)
-# 归一化
+# 标准化
 data = dataTransfer.zScoreNormal(data, fieldNameList=data.columns[:10])
 # 粒度划分
 data = dataTransfer.granularityPartition(data, N=3, aggMode='mean')

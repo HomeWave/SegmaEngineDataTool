@@ -78,36 +78,74 @@ def checkInvalidRow(dataDF, threshold):
     invalidnum = tagDF.filter(tagDF.isInvalid==True).count()
     return invalidnum, tagDF
 
-def checkInvalidCol(dataDF, threshold):
+def checkInvalidCol(dataDF,threshold):
     '''
     :param dataDF: 数据表; DataFrame
     :param threshold:空值(Null/Nan)阈值;float or int
-    :return:无效列个数,invalidnum，无效列名,invalidname
+    :return:无效列个数，含有大于阈值的无效列列名和连续递增ID的DataFrame
     '''
     if type(threshold) is not float and type(threshold) is not int:
         raise TypeError('Invalid threshold')
-    if threshold < 0:
+    if threshold < 0.0:
         raise ValueError('Invalid threshold')
-    miss1 = dataDF.agg(*[(1-(fn.count(value)/fn.count('*'))).alias(value) for value in dataDF.columns]).toPandas()
-    miss2 = dataDF.agg(*[(fn.count('*')-fn.count(value)).alias(value) for value in dataDF.columns]).toPandas()
-    invalidname = []
-    invalidnum = 0
-    if (threshold <= 1) and (threshold >= 0):
-        for value in miss1.columns:
-            if float(miss1[value]) > threshold:
-                invalidname.append([value, invalidnum])
-                invalidnum += 1
-        schema = typ.StructType([typ.StructField('invalidColName', typ.StringType(), True), typ.StructField('ContinuesID', typ.IntegerType(), True)])
-        # invalidname = spark.createDataFrame(invalidname,schema=schema)
-    else:
-        for value in miss2.columns:
-            if float(miss2[value])>threshold:
-                invalidname.append([value,invalidnum])
-                invalidnum += 1
-        schema = typ.StructType([typ.StructField('invalidColName',typ.StringType(),True),typ.StructField('continuousID', typ.IntegerType(),True)])
-        # invalidname = spark.createDataFrame(invalidname,schema=schema)
-    return invalidnum, invalidname
 
+    #不能识别表格中NaN的版本
+    # miss1 = dataDF.agg(*[(1-(fn.count(value)/fn.count('*'))).alias(value) for value in dataDF.columns]).toPandas()
+    # miss2 = dataDF.agg(*[(fn.count('*')-fn.count(value)).alias(value) for value in dataDF.columns]).toPandas()
+    # invalidname = []
+    # invalidnum = 0
+    # if (threshold <= 1.0) & (threshold >= 0.0):
+    #     for value in miss1.columns:
+    #         if float(miss1[value]) > threshold:
+    #             invalidname.append([value, invalidnum])
+    #             invalidnum += 1
+    #     schema = typ.StructType([typ.StructField('invalidColName', typ.StringType(), True),
+    #                              typ.StructField('ContinuesID', typ.IntegerType(), True)])
+    #     invalidname = spark.createDataFrame(invalidname, schema=schema)
+    # else:
+    #     for value in miss2.columns:
+    #         if float(miss2[value]) > threshold:
+    #             invalidname.append([value, invalidnum])
+    #             invalidnum += 1
+    #     schema = typ.StructType([typ.StructField('invalidColName', typ.StringType(), True),
+    #                              typ.StructField('continuousID', typ.IntegerType(), True)])
+    #     invalidname = spark.createDataFrame(invalidname, schema=schema)
+
+    #构建三个RDD，分别为：阈值为比例时的每列的缺失值个数，阈值为个数时的每列的缺失值个数，表头名称
+    miss1 = sc.parallelize([])
+    miss2 = sc.parallelize([])
+    name = sc.parallelize([])
+    for eachname in dataDF.columns:
+        exp = geneExp("dataDF", eachname)
+        dataDF1 = dataDF.withColumn("isNullOrNan", eval(exp)).select("isNullOrNan")
+        missnum1 = (dataDF1.filter(dataDF1.isNullOrNan == 1).count())/dataDF1.count()
+        missnum2 = dataDF1.filter(dataDF1.isNullOrNan == 1).count()
+        insertRow1 = sc.parallelize([Row( NullOrNanRate= missnum1 )])
+        insertRow2 = sc.parallelize([Row(NullOrNanNumber=missnum2)])
+        insertRow3 = sc.parallelize([Row( invalidColName=eachname)])
+        miss1 = sc.union([miss1, insertRow1])
+        miss2 = sc.union([miss2, insertRow2])
+        name = sc.union([name, insertRow3])
+    #将三个RDD转成DataFrame
+    miss1 = spark.createDataFrame(miss1)
+    miss2 = spark.createDataFrame(miss2)
+    name = spark.createDataFrame(name)
+    miss1 = addIdCol(miss1, "continuousID")
+    miss2 = addIdCol(miss2, "continuousID")
+    name = addIdCol(name, "continuousID_new")
+    if (threshold <= 1.0) & (threshold >= 0.0):
+        #当阈值为比例时，将miss1与表名合并筛选，添加Id
+        df_join = miss1.join(name, miss1.continuousID == name.continuousID_new)
+        newdataDF = df_join.filter(df_join.NullOrNanRate > threshold).select('invalidColName')
+        newdataDF = addIdCol(newdataDF)
+        invalidnum = newdataDF.count()
+    else:
+        #当阈值为比值时，将miss2与表名合并筛选，添加Id
+        df_join = miss2.join(name, miss2.continuousID == name.continuousID_new)
+        newdataDF = df_join.filter(df_join.NullOrNanNumber > threshold).select('invalidColName')
+        newdataDF = addIdCol(newdataDF)
+        invalidnum = newdataDF.count()
+    return invalidnum, newdataDF
 
 def changename(dataDF):
     '''
@@ -122,7 +160,7 @@ def checkDuplicateRow(dataDF,fieldNameList=None):
     '''
     :param dataDF: 数据表；DataFrame
     :param fieldNameList: 字段名；list
-    :return:含有不包括首个重复行的重复行行标tagDF
+    :return:含有不包括首个连续重复行的行标tagDF
     '''
     if fieldNameList == None:
         df1 = addIdCol(dataDF)
@@ -366,13 +404,20 @@ class TestcheckInvalidData(unittest.TestCase):
         self.assertRaises(ValueError, checkInvalidCol, test, -1)
     def test_value(self):
         '''
-        检测阈值输入的极端情况
+        检测阈值输入的极端情况以及正常情况
         '''
-        test = spark.createDataFrame([(None, 2, 3), (2, None, 6), (3, None, 9), (4, 3, None), (4, 3, None), (6, 2, None), (7, 5, 6), (8, 0, 2),(9, 2, None)], ['id', 'number1', 'number2'])
+        test = spark.createDataFrame([(1.0, 2.0, 3.0), (2.0, float('NaN'), 6.0), (3.0, None, 9.0), (4.0, 3.0, float('NaN')), (4.0, 3.0, None), (6.0, 2.0, float('NaN')), (7.0, 5.0, 6.0), (8.0, 0.0, 2.0),(9.0, 2.0, None)], ['id', 'number1', 'number2'])
+        test1 = spark.createDataFrame([(2, 2, 3), (2,1, 6), (3, 4, 9), (4, 3, 5), (4, 3, 6), (6, 2, 2), (7, 5, 6), (8, 0, 2),(9, 2, 3)], ['id', 'number1', 'number2'])
         a, b = checkInvalidRow(test, 9999)
         c, d = checkInvalidCol(test, 0)
+        e, f = checkInvalidCol(test1, 0.1)
+        g, h = checkInvalidCol(test, 0.3)
+        i, j = checkInvalidCol(test, 3)
         self.assertTrue(a == 0)
-        self.assertTrue(c == 3)
+        self.assertTrue(c == 2)
+        self.assertTrue(e == 0)
+        self.assertTrue(g == 1)
+        self.assertTrue(i == 1)
 
 class TestcheckDuplicateData(unittest.TestCase):
 
