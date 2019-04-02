@@ -215,6 +215,24 @@ def selectRowByPartField(dataDF, partValueDF):
     dataDF = dataDF.join(partValueDF, eval("dataDF."+col2[0]+'==partValueDF.'+col3[0]))
     dataDF = eval(exp)
     return eval(exp_d)
+
+def StandardDeviation(dataDF):
+    '''
+    计算一列的标准差
+    :param dataDF:只有一列的数据表,DataFrame
+    :return:标准差的值,float
+    '''
+    # 接口检测
+    if type(spark.createDataFrame([[1]])) != type(dataDF):
+        raise TypeError("标识表必须为spark DataFrame！")
+    if len(dataDF.columns) != 1 :
+        raise TypeError("标识表只能为单列表！")
+    data = dataDF.toPandas()
+    STD = data.std()
+    STD = float(STD)
+    return STD
+
+
 #==============================================================================
 #==============================================================================
 '''
@@ -302,6 +320,15 @@ class TestBasicOpera1(unittest.TestCase):
         #
         res = selectRowByPartField(spark.createDataFrame([[1,2,3,4],[3,5,6,7]]), spark.createDataFrame([[1,2],[3,4]]))
         print(res.show())
+
+    def test_StandardDeviation(self):
+        '''
+        测试接口和输出格式
+        '''
+        self.assertRaises(TypeError, StandardDeviation,spark.createDataFrame([(1, 1.0), (1, 2.0), (2, 3.0), (2, 5.0), (2, 10.0)], ("id", "v")))
+        test = spark.createDataFrame([(1, 1.0), (1, 2.0), (2, 3.0), (2, 5.0), (2, 10.0)], ("id", "v"))
+        STD = StandardDeviation(test.select('id'))
+        self.assertTrue(type(STD) == float)
 
 if __name__=="__main__":
     # from pyspark.sql import SparkSession

@@ -12,7 +12,8 @@ from pyspark.sql.functions import monotonically_increasing_id, floor, row_number
 from pyspark.sql.types import StructType, StructField, LongType, FloatType, StringType  # 导入类型
 from pyspark.sql import Window
 import numpy as np
-from dataBasicOpera import changeFieldName, addIdCol
+from dataBasicOpera import changeFieldName, addIdCol,StandardDeviation
+from pyspark.sql.functions import pandas_udf, PandasUDFType
 
 spark=SparkSession \
 .builder \
@@ -118,12 +119,22 @@ def granularityPartition(dataDF, N, aggMode='mean'):
         raise ValueError("aggMode必须为mean\std\min\max\count之一")
     dataDF = addIdCol(dataDF, idFieldName="id_temp_bob")
     dataDF = dataDF.withColumn("group_id_temp_bob", floor(dataDF.id_temp_bob/N))
-    dataDF = eval("dataDF.groupby('group_id_temp_bob')."+aggMode+"()")
-    dataDF = dataDF.drop("id_temp_bob").drop("group_id_temp_bob")
-    dataDF = changeFieldName(dataDF, "count", "countN")
-    for each in dataDF.columns:
-        dataDF = changeFieldName(dataDF, each, each.replace('(','_').replace(')','_'))
-    return dataDF.drop(aggMode+"_id_temp_bob_").drop(aggMode+"_group_id_temp_bob_")
+    if aggMode == 'std':
+    #     pandas_udf(StandardDeviation,"float", PandasUDFType.SCALAR)
+    #     dataDF = dataDF.groupby('group_id_temp_bob').StandardDeviation(dataDF.columns)
+    #     dataDF = dataDF.drop("id_temp_bob").drop("group_id_temp_bob")
+    #     return dataDF
+        pass
+    else:
+        dataDF = eval("dataDF.groupby('group_id_temp_bob')."+aggMode+"()")
+        dataDF = dataDF.drop("id_temp_bob").drop("group_id_temp_bob")
+        dataDF = changeFieldName(dataDF, "count", "countN")
+        for each in dataDF.columns:
+            dataDF = changeFieldName(dataDF, each, each.replace('(','_').replace(')','_'))
+        if aggMode == 'mean':
+            return dataDF.drop('avg_id_temp_bob_').drop("avg_group_id_temp_bob_")
+        else:
+            return dataDF.drop(aggMode+"_id_temp_bob_").drop(aggMode+"_group_id_temp_bob_")
 
 def multiFieldPartition(dataDF, fieldNameList, aggMode='mean'):
     '''
@@ -311,6 +322,13 @@ class TestDataTranster(unittest.TestCase):
         fieldNameList = self.dataDF.columns
         # resDF = granularityPartition(self.dataDF, N=3, aggMode='mean')
         # self.assertTrue(sum(sum((np.array(resDF.toPandas())-self.granuParTest)**2))<0.1)
+
+        #输出格式测试
+        test = spark.createDataFrame([(1,3.2,1.0),(2,1.5,1.0),(3,2.3,2.0),(4,2.4,2.0),(5,3.5,3.0),(6,4.7,7.5),(7,4.2,4.7),(8,3.5,4.0)],['id', 'number1', 'number2'])
+        data1 = granularityPartition(test, N=3, aggMode='mean')
+        #data2 = granularityPartition(test, N=2, aggMode='std')
+        self.assertTrue(len(data1.columns) == 3)
+        #self.assertTrue(len(data1.columns) == 3)
 
     def test_multiFieldPartition(self):
         '''
