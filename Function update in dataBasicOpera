@@ -1,0 +1,4 @@
+2019/4/2
+author Jerry
+dataBasicOpera 功能添加
+添加了StandardDeviation函数，用于计算输入的pyspark的DataFrame格式的一列标准差。返回为float格式的标准差数值。同时添加了检验接口和输出格式的单元测试
