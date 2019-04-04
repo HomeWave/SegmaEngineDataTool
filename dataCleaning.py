@@ -267,9 +267,9 @@ def nanProcess(tableName, ColName, Method, Filling_Manually_Value=None):
         pandas_desc = desc_col.toPandas()
 
         if num_null_nan == 0:  # 检测缺失值是否为0
-            raise ValueError('---------- This Column Has NO NULL OR NAN VALUE-------------')
+            print('---------- This Column Has NO NULL OR NAN VALUE-------------')
         elif num_notna == 0:  # 是否全为缺失值
-            raise ValueError('----------- This Column IS ALL Missing Values -------------')
+            print('----------- This Column IS ALL Missing Values -------------')
         else:
             if Method == "Filling_Manually":  # 人为自主填充
                 filled_table = tableName.na.fill({ColName: Filling_Manually_Value})
@@ -461,12 +461,6 @@ class Test_nanProcess(unittest.TestCase):
             result = nanProcess(self.dataDF, "fx", 'Mean_Completer')
         with self.assertRaises(KeyError):
             result1 = nanProcess(self.dataDF, "a", 'Completer')
-
-    def test_col_value(self):
-        with self.assertRaises(ValueError):
-            result = nanProcess(self.dataDF, "c", "Mode_Completer")
-        with self.assertRaises(ValueError):
-            result1 = nanProcess(self.dataDF, "b", "Mode_Completer")
 
     def test_col_type(self):
         with self.assertRaises(TypeError):
