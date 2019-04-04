@@ -216,7 +216,7 @@ def selectRowByPartField(dataDF, partValueDF):
     dataDF = eval(exp)
     return eval(exp_d)
 
-def StandardDeviation(dataDF):
+def calSTD(dataDF):
     '''
     计算一列的标准差
     :param dataDF:只有一列的数据表,DataFrame
@@ -321,13 +321,13 @@ class TestBasicOpera1(unittest.TestCase):
         res = selectRowByPartField(spark.createDataFrame([[1,2,3,4],[3,5,6,7]]), spark.createDataFrame([[1,2],[3,4]]))
         print(res.show())
 
-    def test_StandardDeviation(self):
+    def test_calSTD(self):
         '''
         测试接口和输出格式
         '''
-        self.assertRaises(TypeError, StandardDeviation,spark.createDataFrame([(1, 1.0), (1, 2.0), (2, 3.0), (2, 5.0), (2, 10.0)], ("id", "v")))
+        self.assertRaises(TypeError, calSTD,spark.createDataFrame([(1, 1.0), (1, 2.0), (2, 3.0), (2, 5.0), (2, 10.0)], ("id", "v")))
         test = spark.createDataFrame([(1, 1.0), (1, 2.0), (2, 3.0), (2, 5.0), (2, 10.0)], ("id", "v"))
-        STD = StandardDeviation(test.select('id'))
+        STD = calSTD(test.select('id'))
         self.assertTrue(type(STD) == float)
 
 if __name__=="__main__":
