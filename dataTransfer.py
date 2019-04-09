@@ -13,7 +13,6 @@ from pyspark.sql.types import StructType, StructField, LongType, FloatType, Stri
 from pyspark.sql import Window
 import numpy as np
 from dataBasicOpera import changeFieldName, addIdCol,StandardDeviation
-from pyspark.sql.functions import pandas_udf, PandasUDFType
 
 spark=SparkSession \
 .builder \
@@ -112,29 +111,22 @@ def granularityPartition(dataDF, N, aggMode='mean'):
     :param dataDF:待处理数据表
     :param N:块大小
     :param aggMode:
-    :return:聚合方式，可选mean/std/min/max/count
+    :return:聚合方式，可选mean/min/max/count
     '''
-    mode2index = {"mean": 1, "max": 4, "min": 3, "std": 2, "count":0}
+    mode2index = {"mean": 1, "max": 3, "min": 2, "count":0}
     if aggMode not in mode2index:
-        raise ValueError("aggMode必须为mean\std\min\max\count之一")
+        raise ValueError("aggMode必须为mean\min\max\count之一")
     dataDF = addIdCol(dataDF, idFieldName="id_temp_bob")
     dataDF = dataDF.withColumn("group_id_temp_bob", floor(dataDF.id_temp_bob/N))
-    if aggMode == 'std':
-    #     pandas_udf(StandardDeviation,"float", PandasUDFType.SCALAR)
-    #     dataDF = dataDF.groupby('group_id_temp_bob').StandardDeviation(dataDF.columns)
-    #     dataDF = dataDF.drop("id_temp_bob").drop("group_id_temp_bob")
-    #     return dataDF
-        pass
+    dataDF = eval("dataDF.groupby('group_id_temp_bob')."+aggMode+"()")
+    dataDF = dataDF.drop("id_temp_bob").drop("group_id_temp_bob")
+    dataDF = changeFieldName(dataDF, "count", "countN")
+    for each in dataDF.columns:
+        dataDF = changeFieldName(dataDF, each, each.replace('(','_').replace(')','_'))
+    if aggMode == 'mean':
+        return dataDF.drop('avg_id_temp_bob_').drop("avg_group_id_temp_bob_")
     else:
-        dataDF = eval("dataDF.groupby('group_id_temp_bob')."+aggMode+"()")
-        dataDF = dataDF.drop("id_temp_bob").drop("group_id_temp_bob")
-        dataDF = changeFieldName(dataDF, "count", "countN")
-        for each in dataDF.columns:
-            dataDF = changeFieldName(dataDF, each, each.replace('(','_').replace(')','_'))
-        if aggMode == 'mean':
-            return dataDF.drop('avg_id_temp_bob_').drop("avg_group_id_temp_bob_")
-        else:
-            return dataDF.drop(aggMode+"_id_temp_bob_").drop(aggMode+"_group_id_temp_bob_")
+        return dataDF.drop(aggMode+"_id_temp_bob_").drop(aggMode+"_group_id_temp_bob_")
 
 def multiFieldPartition(dataDF, fieldNameList, aggMode='mean'):
     '''
@@ -145,9 +137,9 @@ def multiFieldPartition(dataDF, fieldNameList, aggMode='mean'):
     :param aggMode:mean/min/max/sum/count
     :return:
     '''
-    mode2index = {"mean": 1, "max": 4, "min": 3, "std": 2, "count": 0}
+    mode2index = {"mean": 1, "max": 3, "min": 2, "count": 0}
     if aggMode not in mode2index:
-        raise ValueError("aggMode必须为mean\std\min\max\count之一")
+        raise ValueError("aggMode必须为mean\min\max\count之一")
     columns = dataDF.columns
     for each in fieldNameList:
         if each not in columns:
@@ -326,9 +318,7 @@ class TestDataTranster(unittest.TestCase):
         #输出格式测试
         test = spark.createDataFrame([(1,3.2,1.0),(2,1.5,1.0),(3,2.3,2.0),(4,2.4,2.0),(5,3.5,3.0),(6,4.7,7.5),(7,4.2,4.7),(8,3.5,4.0)],['id', 'number1', 'number2'])
         data1 = granularityPartition(test, N=3, aggMode='mean')
-        #data2 = granularityPartition(test, N=2, aggMode='std')
         self.assertTrue(len(data1.columns) == 3)
-        #self.assertTrue(len(data1.columns) == 3)
 
     def test_multiFieldPartition(self):
         '''
@@ -344,7 +334,6 @@ class TestDataTranster(unittest.TestCase):
         fieldNameList = self.dataDF.columns
         resDF = multiFieldPartition(self.dataDF, fieldNameList=['_1', '_2'], aggMode='mean')
         print("test_multiFieldPartition processed", resDF.show())
-
 
     def test_mapSingleField2Multi(self):
         '''
